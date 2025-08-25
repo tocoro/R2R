@@ -264,17 +264,39 @@ def tokens_count_for_message(message, encoding):
                 encoding.encode(tool_call["function"]["arguments"])
             )
     elif "content" in message:
-        num_tokens += len(encoding.encode(message["content"]))
+        content = message["content"]
+        # Handle OpenAI-style array content (e.g., text + image blocks)
+        if isinstance(content, list):
+            for item in content:
+                # Prefer explicit text blocks
+                if isinstance(item, dict):
+                    if item.get("type") == "text" and isinstance(item.get("text"), str):
+                        num_tokens += len(encoding.encode(item["text"]))
+                    # Fallback: some shapes may use a generic 'content' string
+                    elif isinstance(item.get("content"), str):
+                        num_tokens += len(encoding.encode(item["content"]))
+                elif isinstance(item, str):
+                    num_tokens += len(encoding.encode(item))
+                # Non-textual items (e.g., images) are ignored for token counting
+        elif isinstance(content, str):
+            num_tokens += len(encoding.encode(content))
+        else:
+            # As a last resort, count stringified content to avoid exceptions
+            try:
+                num_tokens += len(encoding.encode(str(content)))
+            except Exception:
+                pass
 
     return num_tokens
 
 
-def num_tokens_from_messages(messages, model="gpt-4.1"):
+def num_tokens_from_messages(messages, model="gpt-4o"):
     """Return the number of tokens used by a list of messages for both user and assistant."""
     try:
         encoding = tiktoken.encoding_for_model(model)
     except KeyError:
-        logger.warning("Warning: model not found. Using cl100k_base encoding.")
+        # Downgrade to debug to avoid noisy logs when models are not mapped in tiktoken
+        logger.debug("Model not found in tiktoken. Using cl100k_base encoding.")
         encoding = tiktoken.get_encoding("cl100k_base")
 
     tokens = 0

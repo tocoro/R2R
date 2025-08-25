@@ -520,6 +520,7 @@ class CitationEvent(SSEEventBase):
 class FinalAnswerData(BaseModel):
     generated_answer: str
     citations: list[Citation]  # refine if you have a citation model
+    conversation_id: Optional[str] = None
 
 
 class FinalAnswerEvent(SSEEventBase):

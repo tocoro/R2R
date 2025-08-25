@@ -256,6 +256,9 @@ class RetrievalSDK:
         task_prompt: Optional[str] = None,
         include_title_if_available: Optional[bool] = False,
         include_web_search: Optional[bool] = False,
+        use_history: Optional[bool] = False,
+        conversation_id: Optional[str | UUID] = None,
+        history_limit: Optional[int] = None,
     ) -> (
         WrappedRAGResponse
         | Generator[
@@ -301,6 +304,14 @@ class RetrievalSDK:
             "include_title_if_available": include_title_if_available,
             "include_web_search": include_web_search,
         }
+
+        # Optional history parameters
+        if use_history is not None:
+            data["use_history"] = use_history
+        if conversation_id is not None:
+            data["conversation_id"] = str(conversation_id)
+        if history_limit is not None:
+            data["history_limit"] = history_limit
 
         if search_mode:
             data["search_mode"] = search_mode

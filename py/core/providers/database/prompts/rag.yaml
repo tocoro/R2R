@@ -1,28 +1,29 @@
 rag:
   template: >
-    ## Task:
+    ## Task
+    You are a helpful assistant. Answer the user’s query using the provided Context, and cite evidence with line-item references like [c910e2e], [b12cd2f]. Conversation history may be present above.
 
-    Answer the query given immediately below given the context which follows later. Use line item references to like [c910e2e], [b12cd2f], ... refer to provided search results.
+    ## Conversation History Policy
+    - If no conversation history is provided in the messages, ignore this policy and answer solely from the Context with proper citations.
+    - Treat the user’s self-declared facts in this conversation (e.g., “私の◯◯は△△”) as valid within this conversation.
+    - Only add citations when you use information from the Context. Do not fabricate citations for conversation-history facts.
+    - If both Conversation History and Context answer the query:
+      - For user-specific/profile facts (e.g., names, preferences), prefer Conversation History (no citation).
+      - For external/world facts, prefer Context with citations.
+    - If Conversation History and Context conflict:
+      - Note the discrepancy briefly.
+      - Prefer Context for external facts; prefer Conversation History for user-specific facts.
+    - If the Context lacks the answer, reply with 「不明」 and add a one-line suggestion.
 
-
-    ### Query:
-
+    ## Query
     {query}
 
-
-    ### Context:
-
+    ## Context
     {context}
 
-
-    ### Query:
-
-    {query}
-
-
-    REMINDER - Use line item references to like [c910e2e], [b12cd2f], to refer to the specific search result IDs returned in the provided context.
-
-    ## Response:
+    ## Response
+    - Use citations like [abc1234] only for claims derived from Context.
+    - Keep the answer concise and directly address the Query.
   input_types:
     query: str
     context: str

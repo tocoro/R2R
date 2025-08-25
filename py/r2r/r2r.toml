@@ -1,6 +1,6 @@
 [app]
 # app settings are global available like `r2r_config.agent.app`
-# project_name = "r2r_default" # optional, can also set with `R2R_PROJECT_NAME` env var
+project_name = "r2r" # optional, can also set with `R2R_PROJECT_NAME` env var
 default_max_documents_per_user = 10_000
 default_max_chunks_per_user = 10_000_000
 default_max_collections_per_user = 5_000
@@ -62,6 +62,12 @@ provider = "bcrypt"
 provider = "postgres"
 
 [database]
+provider = "postgres"
+user = "r2r_user"
+password = "r2r_pass"
+host = "localhost"
+port = 5436
+db_name = "r2r_db"
 default_collection_name = "Default"
 default_collection_description = "Your default collection."
 collection_summary_prompt = "collection_summary"

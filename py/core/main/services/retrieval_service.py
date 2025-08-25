@@ -1,4 +1,5 @@
 import asyncio
+import os
 import json
 import logging
 from copy import deepcopy
@@ -990,6 +991,9 @@ class RetrievalService(Service):
         system_prompt_name: str | None = None,
         task_prompt_name: str | None = None,
         include_web_search: bool = False,
+        use_history: bool = False,
+        conversation_id: Optional[UUID] = None,
+        history_limit: Optional[int] = None,
         **kwargs,
     ) -> Any:
         """
@@ -1027,7 +1031,7 @@ class RetrievalService(Service):
             collector.add_aggregate_result(aggregated_results)
             context_str = format_search_results_for_llm(aggregated_results)
 
-            # 4) Prepare system+task messages
+            # 4) Prepare system+task messages (+ optional history)
             system_prompt_name = system_prompt_name or "system"
             task_prompt_name = task_prompt_name or "rag"
             task_prompt = kwargs.get("task_prompt")
@@ -1038,6 +1042,61 @@ class RetrievalService(Service):
                 task_inputs={"query": query, "context": context_str},
                 task_prompt=task_prompt,
             )
+
+            # If history is enabled, fetch and prepend limited past messages
+            effective_history_limit = (
+                history_limit
+                if history_limit is not None
+                else int(os.getenv("R2R_RAG_HISTORY_LIMIT", "10"))
+            )
+
+            created_conversation_id: Optional[UUID] = None
+            if use_history:
+                # Create or fetch conversation
+                if conversation_id:
+                    try:
+                        conversation_messages = await self.providers.database.conversations_handler.get_conversation(
+                            conversation_id=conversation_id,
+                        )
+                    except Exception:
+                        conversation_messages = None
+                else:
+                    conversation_resp = await self.providers.database.conversations_handler.create_conversation()
+                    created_conversation_id = conversation_resp.id
+                    conversation_id = created_conversation_id
+                    conversation_messages = []
+
+                # Collect and trim history
+                raw_history_msgs: list[Message] = []
+                if conversation_messages:
+                    for message_response in conversation_messages:
+                        if hasattr(message_response, "message"):
+                            raw_history_msgs.append(message_response.message)
+                # Keep only the last N messages
+                if effective_history_limit > 0 and raw_history_msgs:
+                    raw_history_msgs = raw_history_msgs[-effective_history_limit:]
+
+                # Normalize to dicts for LLM provider compatibility
+                normalized_history: list[dict] = []
+                for hm in raw_history_msgs:
+                    if hasattr(hm, "to_dict"):
+                        normalized_history.append(hm.to_dict())
+                    elif hasattr(hm, "model_dump"):
+                        normalized_history.append(hm.model_dump())
+                    elif isinstance(hm, dict):
+                        normalized_history.append(hm)
+                    else:
+                        try:
+                            normalized_history.append({"role": hm.role, "content": hm.content})  # type: ignore[attr-defined]
+                        except Exception:
+                            continue
+
+                # Prepend history right after system message
+                # messages: [system, user(query+context)] → insert history before the final user
+                if messages and len(messages) >= 1:
+                    system_msg = messages[0]
+                    tail_msgs = messages[1:]
+                    messages = [system_msg] + normalized_history + tail_msgs
 
             # 5) Check streaming vs. non-streaming
             if not rag_generation_config.stream:
@@ -1073,6 +1132,35 @@ class RetrievalService(Service):
                     metadata=metadata,
                     completion=llm_text or "",
                 )
+                # Attach conversation_id early if available
+                if use_history and conversation_id:
+                    try:
+                        rag_resp.metadata["conversation_id"] = str(conversation_id)
+                    except Exception:
+                        pass
+                # Persist messages if history is enabled
+                if use_history and conversation_id:
+                    try:
+                        # Save user query
+                        await self.providers.database.conversations_handler.add_message(
+                            conversation_id=conversation_id,
+                            content=Message(role="user", content=query),
+                        )
+                        # Save assistant answer with citations
+                        await self.providers.database.conversations_handler.add_message(
+                            conversation_id=conversation_id,
+                            content=Message(
+                                role="assistant",
+                                content=llm_text or "",
+                                metadata={
+                                    "citations": [c.model_dump() for c in (rag_resp.citations or [])]
+                                },
+                            ),
+                        )
+                        # Attach conversation_id in metadata for client continuity
+                        rag_resp.metadata["conversation_id"] = str(conversation_id)
+                    except Exception:
+                        pass
                 return rag_resp
 
             else:
@@ -1091,6 +1179,19 @@ class RetrievalService(Service):
                     citation_payloads = {}
 
                     partial_text_buffer = ""
+
+                    # Persist the user message at start if history is enabled
+                    message_id: Optional[UUID] = None
+                    if use_history and conversation_id:
+                        try:
+                            user_msg_resp = await self.providers.database.conversations_handler.add_message(
+                                conversation_id=conversation_id,
+                                content=Message(role="user", content=query),
+                            )
+                            if hasattr(user_msg_resp, "id"):
+                                message_id = user_msg_resp.id
+                        except Exception:
+                            pass
 
                     # Begin streaming from the LLM
                     msg_stream = self.providers.llm.aget_completion_stream(
@@ -1215,6 +1316,8 @@ class RetrievalService(Service):
                                     "generated_answer": partial_text_buffer,
                                     "citations": consolidated_citations,
                                 }
+                                if use_history and conversation_id:
+                                    final_answer_evt["conversation_id"] = str(conversation_id)
                                 async for (
                                     line
                                 ) in SSEFormatter.yield_final_answer_event(
@@ -1224,6 +1327,23 @@ class RetrievalService(Service):
 
                                 # (d) Signal the end of the SSE stream
                                 yield SSEFormatter.yield_done_event()
+                                # Persist assistant message if history enabled
+                                if use_history and conversation_id:
+                                    try:
+                                        await self.providers.database.conversations_handler.add_message(
+                                            conversation_id=conversation_id,
+                                            content=Message(
+                                                role="assistant",
+                                                content=partial_text_buffer,
+                                                metadata={
+                                                    "citations": consolidated_citations
+                                                },
+                                            ),
+                                            parent_id=message_id,
+                                        )
+                                    finally:
+                                        pass
+                                # Attach conversation_id in a trailing info event is not needed; client gets it in final response path
                                 break
 
                     except Exception as e:
