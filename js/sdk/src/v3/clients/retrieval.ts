@@ -69,6 +69,10 @@ export class RetrievalClient {
     taskPrompt?: string;
     includeTitleIfAvailable?: boolean;
     includeWebSearch?: boolean;
+    // Conversation history options
+    useHistory?: boolean;
+    conversationId?: string;
+    historyLimit?: number;
   }): Promise<any | ReadableStream<Uint8Array>> {
     const data = {
       query: options.query,
@@ -89,6 +93,15 @@ export class RetrievalClient {
       }),
       ...(options.includeWebSearch && {
         include_web_search: options.includeWebSearch,
+      }),
+      ...(options.useHistory !== undefined && {
+        use_history: options.useHistory,
+      }),
+      ...(options.conversationId && {
+        conversation_id: options.conversationId,
+      }),
+      ...(options.historyLimit !== undefined && {
+        history_limit: options.historyLimit,
       }),
     };
 

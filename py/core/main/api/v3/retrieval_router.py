@@ -332,6 +332,18 @@ class RetrievalRouter(BaseRouterV3):
                 default=False,
                 description="Include web search results provided to the LLM.",
             ),
+            use_history: bool = Body(
+                default=False,
+                description="Use conversation history to answer. Disabled by default for backward compatibility.",
+            ),
+            conversation_id: Optional[UUID] = Body(
+                default=None,
+                description="Conversation ID to continue. When omitted and use_history=true, a new conversation is created.",
+            ),
+            history_limit: Optional[int] = Body(
+                default=None,
+                description="Maximum number of past messages to include. Defaults from env R2R_RAG_HISTORY_LIMIT (e.g., 10).",
+            ),
             auth_user=Depends(self.providers.auth.auth_wrapper()),
         ) -> WrappedRAGResponse:
             """Execute a RAG (Retrieval-Augmented Generation) query.
@@ -371,7 +383,7 @@ class RetrievalRouter(BaseRouterV3):
             - `search_results`: Initial search results from your documents
             - `message`: Partial tokens as they're generated
             - `citation`: Citation metadata when sources are referenced
-            - `final_answer`: Complete answer with structured citations
+            - `final_answer`: Complete answer with structured citations. When `use_history=true`, includes `conversation_id`.
 
             **Example Response:**
             ```json
@@ -403,6 +415,9 @@ class RetrievalRouter(BaseRouterV3):
                 task_prompt=task_prompt,
                 include_title_if_available=include_title_if_available,
                 include_web_search=include_web_search,
+                use_history=use_history,
+                conversation_id=conversation_id,
+                history_limit=history_limit,
             )
 
             if rag_generation_config.stream:
